@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dynamic Random Color Morphing Particles</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #020205; /* Deep space dark blue-black */
+      font-family: Arial, sans-serif;
+    }
+    
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+    }
+
+    #custom-input-wrap {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 10px;
+      border-radius: 30px;
+      backdrop-filter: blur(10px);
+      display: flex;
+      gap: 10px;
+      border: 1px solid rgba(238, 82, 130, 0.2);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+
+    #custom-text-input {
+      padding: 8px 15px;
+      border: 1px solid rgba(238, 82, 130, 0.5);
+      border-radius: 20px;
+      background: #0d0d13;
+      color: #fff;
+      font-size: 1rem;
+      outline: none;
+      width: 200px;
+    }
+
+    #apply-btn {
+      padding: 8px 20px;
+      background: linear-gradient(45deg, #ff416c, #ff4b2b);
+      border: none;
+      color: white;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: 0.3s;
+      box-shadow: 0 0 10px rgba(255, 65, 108, 0.4);
+    }
+
+    #apply-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 15px rgba(255, 65, 108, 0.8);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="custom-input-wrap">
+    <input type="text" id="custom-text-input" placeholder="Kuch special type karein...">
+    <button id="apply-btn">Apply</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.136.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.136.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    console.clear();
+
+    /* 1. SETUP */
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+    camera.position.set(0, 0, 360); // Clean Front View
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.enableZoom = true;
+
+    const particleCount = 11000; 
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    
+    const flowerTargets = [], hbdTargets = [], nandiniTargets = [], messageTargets = [];
+    let customTargets = [];
+    const currentTargets = [];
+
+    // Mouse tracking
+    const mouse = new THREE.Vector2(-9999, -9999);
+    const raycaster = new THREE.Raycaster();
+    const interactionPlane = new THREE.Mesh(
+      new THREE.PlaneGeometry(2000, 2000),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    scene.add(interactionPlane);
+
+    /* 2. GENERATE TEXT TO VECTOR LOGIC */
+    function generateTextTargets(text, fontSize, targetArray) {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = 2200; 
+      canvas.height = 400;
+      
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `Bold ${fontSize}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const points = [];
+
+      for (let y = 0; y < canvas.height; y += 2) { 
+        for (let x = 0; x < canvas.width; x += 2) {
+          const index = (y * canvas.width + x) * 4;
+          if (imgData[index] > 128) {
+            points.push({
+              x: (x - canvas.width / 2) * 0.28, 
+              y: -(y - canvas.height / 2) * 0.28,
+              z: (Math.random() - 0.5) * 4
+            });
+          }
+        }
+      }
+
+      targetArray.length = 0; 
+      for (let i = 0; i < particleCount; i++) {
+        if (points.length > 0) {
+          const pt = points[i % points.length];
+          targetArray.push({ x: pt.x, y: pt.y, z: pt.z });
+        } else {
+          targetArray.push({ x: 0, y: 0, z: 0 });
+        }
+      }
+    }
+
+    /* 3. INITIALIZE SHAPES & GLOBAL COLOR */
+    // Rainbow ke rich solid shades ka ek select array banaya hai random pick karne ke liye
+    const rainbowColors = [
+      new THREE.Color(0xff2a5f), // Hot Rose Pink
+      new THREE.Color(0x00f3ff), // Electric Neon Cyan
+      new THREE.Color(0xb500ff), // Magical Purple
+      new THREE.Color(0xff7700), // Divine Saffron Orange
+      new THREE.Color(0x00ff66), // Bright Spring Green
+      new THREE.Color(0xffd700), // Luxury Gold Yellow
+      new THREE.Color(0x3355ff)  // Deep Royal Blue
+    ];
+
+    // Pehla color select kiya default base ke liye
+    let activeColor = rainbowColors[0];
+
+    // Helper function jo picchle color se alag koi naya naya random color chunega
+    function getRandomRainbowColor() {
+      let availableColors = rainbowColors.filter(c => c !== activeColor);
+      return availableColors[Math.floor(Math.random() * availableColors.length)];
+    }
+
+    for (let i = 0; i < particleCount; i++) {
+      // Flower shape generation matrix
+      const phi = i * 0.04;
+      const theta = Math.acos((Math.random() * 2) - 1);
+      const r = 65 * Math.sin(5 * phi) + 35;
+
+      const x = r * Math.sin(theta) * Math.cos(phi);
+      const y = r * Math.sin(theta) * Math.sin(phi); 
+      const z = Math.abs(r * Math.cos(theta)) + (phi * 0.08) - 40;
+
+      flowerTargets.push({ x: x, y: y, z: z });
+      
+      positions[i * 3] = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+
+      colors[i * 3] = activeColor.r;
+      colors[i * 3 + 1] = activeColor.g;
+      colors[i * 3 + 2] = activeColor.b;
+
+      currentTargets.push({ 
+        x: x, 
+        y: y, 
+        z: z, 
+        speed: 0.03 + Math.random() * 0.03,
+        vx: 0, vy: 0, vz: 0
+      });
+    }
+
+    generateTextTargets("Happy Birthday", 115, hbdTargets);
+    generateTextTargets("Nandini", 140, nandiniTargets);
+    generateTextTargets("Shree Ram Ji Ki Kripa Aap Par Hamesha Bani Rahe ❤️", 75, messageTargets); 
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    /* 4. MATERIAL CONFIGURATION */
+    const material = new THREE.PointsMaterial({
+      size: 1.6, 
+      vertexColors: true, 
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false
+    });
+
+    const particleSystem = new THREE.Points(geometry, material);
+    scene.add(particleSystem);
+
+    /* 5. MORPHING TIMELINE MANAGER */
+    let currentPhase = 0; 
+    let isCustomMode = false;
+    let morphProgress = 1.0; 
+    let loopTimeoutToken = null; 
+
+    function switchShape() {
+      if (isCustomMode) return; 
+
+      currentPhase = (currentPhase + 1) % 4; 
+      let activeSource;
+
+      if (currentPhase === 0) {
+        activeSource = flowerTargets;
+      } else if (currentPhase === 1) {
+        activeSource = hbdTargets;
+      } else if (currentPhase === 2) {
+        activeSource = nandiniTargets;
+      } else {
+        activeSource = messageTargets;
+      }
+
+      // FIX: Har ek shape switch hone par particles ka solid color randomly badal jayega!
+      activeColor = getRandomRainbowColor();
+      morphProgress = 0.0; 
+
+      for (let i = 0; i < particleCount; i++) {
+        currentTargets[i].x = activeSource[i].x;
+        currentTargets[i].y = activeSource[i].y;
+        currentTargets[i].z = activeSource[i].z;
+        currentTargets[i].speed = 0.03 + Math.random() * 0.04;
+      }
+
+      loopTimeoutToken = setTimeout(switchShape, currentPhase === 3 ? 5500 : 4500);
+    }
+
+    loopTimeoutToken = setTimeout(switchShape, 4500);
+
+    /* 6. MOUSE POSITION TRACKING */
+    let mouse3D = new THREE.Vector3();
+
+    window.addEventListener('mousemove', (e) => {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(interactionPlane);
+      if (intersects.length > 0) {
+        mouse3D.copy(intersects[0].point);
+      }
+    });
+
+    window.addEventListener('mouseleave', () => {
+      mouse3D.set(-9999, -9999, 0);
+    });
+
+    /* 7. PHYSICS ENGINE & ANIMATION */
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const time = clock.getElapsedTime();
+      const posAttr = geometry.attributes.position;
+      const colAttr = geometry.attributes.color;
+      const posArr = posAttr.array;
+      const colArr = colAttr.array;
+
+      if (morphProgress < 1.0) morphProgress += 0.015;
+
+      const sizePulse = 1.6 + Math.sin(morphProgress * Math.PI) * 1.5;
+      material.size = sizePulse;
+
+      for (let i = 0; i < particleCount; i++) {
+        const target = currentTargets[i];
+        const idxX = i * 3;
+        const idxY = i * 3 + 1;
+        const idxZ = i * 3 + 2;
+
+        let cx = posArr[idxX];
+        let cy = posArr[idxY];
+        let cz = posArr[idxZ];
+
+        // Mouse repellent calculation
+        let m3dLocal = mouse3D.clone().applyMatrix4(particleSystem.matrixWorld.clone().invert());
+        let dx = cx - m3dLocal.x;
+        let dy = cy - m3dLocal.y;
+        let dz = cz - m3dLocal.z;
+        let distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+        if (distance < 45) {
+          let force = (45 - distance) / 45;
+          let pushStrength = force * 4.5;
+          target.vx += (dx / distance) * pushStrength;
+          target.vy += (dy / distance) * pushStrength;
+        }
+
+        target.vx *= 0.92;
+        target.vy *= 0.92;
+
+        posArr[idxX] += (target.x - posArr[idxX]) * target.speed + target.vx;
+        posArr[idxY] += (target.y - posArr[idxY]) * target.speed + target.vy;
+        posArr[idxZ] += (target.z - posArr[idxZ]) * target.speed;
+
+        if (currentPhase === 0 && !isCustomMode) {
+          posArr[idxX] += Math.sin(time * 2 + i) * 0.04;
+          posArr[idxY] += Math.cos(time * 2 + i) * 0.04;
+        }
+
+        // Color transition interpolation (Smoothened fade into the new active color)
+        colArr[idxX] += (activeColor.r - colArr[idxX]) * 0.05;
+        colArr[idxY] += (activeColor.g - colArr[idxY]) * 0.05;
+        colArr[idxZ] += (activeColor.b - colArr[idxZ]) * 0.05;
+      }
+
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+
+      if (currentPhase !== 0 || isCustomMode) {
+        particleSystem.rotation.y = 0;
+        particleSystem.rotation.x = 0;
+      } else {
+        particleSystem.rotation.y = time * 0.15; 
+        particleSystem.rotation.x = 0;
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    /* 8. INPUT CONTROL & RETURN LOGIC */
+    const inputField = document.getElementById("custom-text-input");
+    const applyBtn = document.getElementById("apply-btn");
+    let customReturnToken = null; 
+
+    applyBtn.addEventListener("click", () => {
+      const text = inputField.value.trim();
+      
+      if (loopTimeoutToken) clearTimeout(loopTimeoutToken);
+      if (customReturnToken) clearTimeout(customReturnToken);
+
+      if (text !== "") {
+        isCustomMode = true;
+        currentPhase = 4; 
+        
+        customTargets = [];
+        generateTextTargets(text, 100, customTargets); 
+        
+        // Custom text par bhi naya fresh random color trigger hoga
+        activeColor = getRandomRainbowColor();
+        morphProgress = 0.0; 
+
+        for (let i = 0; i < particleCount; i++) {
+          currentTargets[i].x = customTargets[i].x;
+          currentTargets[i].y = customTargets[i].y;
+          currentTargets[i].z = customTargets[i].z;
+          currentTargets[i].speed = 0.05; 
+        }
+
+        // Custom text standard auto return block (5 seconds hold, then jump to Flower)
+        customReturnToken = setTimeout(() => {
+          isCustomMode = false;
+          currentPhase = 3; 
+          inputField.value = ""; 
+          switchShape();
+        }, 5000);
+
+      } else {
+        isCustomMode = false;
+        currentPhase = 3; 
+        switchShape();
+      }
+    });
+
+    inputField.addEventListener("keypress", (e) => {
+      if (e.key === "Enter") applyBtn.click();
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+  </script>
+</body>
+</html>
